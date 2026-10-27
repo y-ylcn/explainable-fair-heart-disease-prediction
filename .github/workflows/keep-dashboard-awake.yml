@@ -1,0 +1,54 @@
+# Keep the live Streamlit dashboard awake, since the free hosting puts an app to sleep after a period with no visitors
+name: Keep dashboard awake
+
+on:
+  # Run every six hours, and allow a manual run from the Actions tab
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+jobs:
+  wake:
+    runs-on: ubuntu-latest
+    steps:
+      # Set up Python to run the wake-up script
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Install Playwright and the Chromium browser it uses to open the dashboard
+      - run: pip install playwright && playwright install --with-deps chromium
+
+      # Open the dashboard and press the wake-up button if the app is asleep
+      - run: |
+          python - <<'EOF'
+          # Playwright opens the dashboard in a browser without a screen, so it can be run on a schedule
+          from playwright.sync_api import sync_playwright
+
+          # The address of the live dashboard, kept in one place so it only needs changing here
+          DASHBOARD_URL = 'https://heart-disease-fairness-dashboard.streamlit.app'
+
+          with sync_playwright() as playwright:
+
+              # Start a browser and open the dashboard, allowing up to 60 seconds for the page to load
+              browser = playwright.chromium.launch()
+              dashboard_page = browser.new_page()
+              dashboard_page.goto(DASHBOARD_URL, timeout=60000)
+
+              # Wait 5 seconds so the page can show either the dashboard or the sleep message
+              dashboard_page.wait_for_timeout(5000)
+
+              # A sleeping app shows a wake-up button, so look for it on the page
+              wake_button = dashboard_page.get_by_text('Yes, get this app back up!')
+
+              # If the button is there, click it and wait 30 seconds for the app to start again
+              if wake_button.count() > 0:
+                  wake_button.click()
+                  dashboard_page.wait_for_timeout(30000)
+                  print('The dashboard at {} was asleep and has been woken up'.format(DASHBOARD_URL))
+              else:
+                  print('The dashboard at {} was already running'.format(DASHBOARD_URL))
+
+              # Close the browser once the check is done, as in the Playwright documentation
+              browser.close()
+          EOF
